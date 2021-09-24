@@ -144,3 +144,23 @@ A **handler** receives and processes the HTTP request sent from the client. It a
 - In the MVC pattern the handler is the controller, but also the model. In an ideal MVC pattern implementation, the controller would be thin, with only routing and HTTP message unpacking and packing logic. The models are fat, containing the application logic and data.
 
 A **template** is code that can be converted into HTML that’s sent back to the client in an HTTP response message. Templates can be partly in HTML or not at all. A template engine generates the final HTML using templates and data. 
+
+## 1.10 A Simple Web App
+
+```
+package main
+
+import (
+    "fmt"
+    "net/http"
+)
+
+func handler(writer http.ResponseWriter, request *http.Request) {
+    fmt.Fprintf(writer, "Hello World, %s!", request.URL.Path[1:])
+}
+
+func main() {
+    http.HandleFunc("/", handler)
+    http.ListenAndServe(":8080", nil)
+}
+```
