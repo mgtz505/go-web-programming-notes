@@ -1,6 +1,6 @@
 # go-web-programming-notes
 Notes for Go Web Programming by Sau Sheong Chang
-
+# Intro
 ## 1.1. Using Go for web applications
 
 Go is a relatively new programming language, with a thriving and growing community. It is well suited for writing server-side programs that are fast. It’s simple and familiar to most programmers who are used to procedural programming, but it also provides features of functional programming. It supports concurrency by default, has a modern packaging system, does garbage collection, and has an extensive and powerful set of built-in standard libraries.
@@ -162,5 +162,145 @@ func handler(writer http.ResponseWriter, request *http.Request) {
 func main() {
     http.HandleFunc("/", handler)
     http.ListenAndServe(":8080", nil)
+}
+```
+# A Simple Webapp
+In this chapter, we’ll develop a simple internet forum called ChitChat. Because this is a simple example, we’ll be implementing only the key features of an internet forum. 
+
+ChitChat’s application design is typical of any web application. As mentioned in chapter 1, web applications have the general flow of the client sending a request to a server, and a server responding to that request
+
+ChitChat’s application logic is coded in the server. While the client triggers the requests and provides the data to the server, the format and the data requested are suggested by the server, provided in hyperlinks on the HTML pages that the server serves to the client
+
+The format for the request is normally the prerogative of the application itself. For ChitChat, we’ll be using the following format: http:///?
+
+The server name is the name of the ChitChat server; the handler name is the name of the handler that’s being called. The handler name is hierarchical: the root of the handler name is the module that’s being called, the second part the submodule, and so on, until it hits the leaf, which is the handler of the request within that submodule. If we have a module called thread and we need to have a handler to read the thread, the handler name is /thread/read.
+
+The parameters of the application, which are URL queries, are whatever we need to pass to the handler to process the request. In this example, we need to provide the unique identifier (ID) of the thread to the handler, so the parameters will be id=123, where 123 is the unique ID.
+
+Let’s recap the request; this is how the URL being sent into the ChitChat server will look (assuming chitchat is the server name): http://chitchat/thread/read?id=123.
+
+
+![](https://drek4537l1klr.cloudfront.net/chang/Figures/02fig04_alt.jpg)
+
+## 2.3 Data Model
+Most applications need to work on data, in one form or another. In ChitChat, we store the data in a relational database and use SQL to interact with the database.
+
+ChitChat’s data model is simple and consists of only four data structures, which in turn map to a relational database. The four data structures are
+
+User —Representing the forum user’s information
+Session —Representing a user’s current login session
+Thread —Representing a forum thread (a conversation among forum users)
+Post —Representing a post (a message added by a forum user) within a thread
+
+![](https://drek4537l1klr.cloudfront.net/chang/Figures/02fig05_alt.jpg)
+
+## 2.4 Recieving and Processing Requests
+Receiving and processing requests is the heart of any web application.
+
+Recall sequence of events:
+1)  A client sends a request to a URL at the server.
+
+2)  The server has a multiplexer, which redirects the request to the correct handler to process the request.
+
+3)  The handler processes the request and performs the necessary work.
+
+4)  The handler calls the template engine to generate the correct HTML to send back to the client.
+
+### 2.4.1 The Multiplexer
+
+We start all Go applications with a main source code file, which is the file that contains the main function and is the starting point where the compiled binary executes.
+
+```
+package main
+
+import (
+  "net/http"
+)
+
+func main() {
+
+
+  mux := http.NewServeMux()
+  files := http.FileServer(http.Dir("/public"))
+  mux.Handle("/static/", http.StripPrefix("/static/", files))
+
+    mux.HandleFunc("/", index)
+
+
+  server := &http.Server{
+    Addr:     "0.0.0.0:8080",
+    Handler:  mux,
+  }
+  server.ListenAndServe()
+}
+```
+
+First create the multiplexer, the piece of code that redirects a request to a handler:
+
+```
+mux := http.NewServeMux()
+```
+To redirect the root URL to a handler function, you use the HandleFunc function
+```
+mux.HandleFunc("/", index)
+```
+
+HandleFunc takes the URL as the first parameter, and the name of the handler function as the second parameter, so when a request comes for the root URL (/), it’s redirected to a handler function named index
+
+You don’t need to provide the parameters to the handler function because all handler functions take ResponseWriter as the first parameter and a pointer to Request as the second parameter.
+
+### 2.4.2 Serving Static Files
+
+Besides redirecting to the appropriate handler, you can use the multiplexer to serve static files. To do this, you use the FileServer function to create a handler that will serve files from a given directory. Then you pass the handler to the Handle function of the multiplexer. You use the StripPrefix function to remove the given prefix from the request URL’s path.
+
+```
+files := http.FileServer(http.Dir("/public"))
+mux.Handle("/static/", http.StripPrefix("/static/", files))
+```
+In this code, you’re telling the server that for all request URLs starting with /static/, strip off the string /static/ from the URL, and then look for a file with the name starting at the public directory. For example, if there’s a request for the file http://localhost/static/css/bootstrap.min.css the server will look for the file
+
+When it’s found, the server will serve it as it is, without processing it first.
+
+### 2.4.3 Creating the Handler Function
+
+In a previous section you used HandleFunc to redirect the request to a handler function. Handler functions are nothing more than Go functions that take a ResponseWriter as the first parameter and a pointer to a Request as the second, shown next.
+
+```
+func index(w http.ResponseWriter, r *http.Request) {
+  files := []string{"templates/layout.html",
+                    "templates/navbar.html",
+                    "templates/index.html",}
+  templates := template.Must(template.ParseFiles(files...))
+  threads, err := data.Threads(); if err == nil {
+
+    templates.ExecuteTemplate(w, "layout", threads)
+  }
+}
+```
+Notice that you’re using the Template struct from the html/template standard library so you need to add that in the list of imported libraries. The index handler function doesn’t do anything except generate the HTML and write it to the ResponseWriter. We’ll cover generating HTML in the upcoming section.
+
+You might notice that the various handler functions aren’t defined in the same main.go file. Instead, I split the definition of the handler functions in other files (please refer to the code in the GitHub repository). So how do you link these files
+
+In Go, you simply make every file in the same directory part of the main package and they’ll be included. Alternatively, you can place them in a separate package and import them. We’ll use this strategy when connecting with the database, as you’ll see later.
+
+### 2.4.4 Access Control using Cookies
+Once the user logs in, you need to indicate in subsequent requests that the user has already logged in. To do this, you write a cookie to the response header, which goes back to the client and is saved at the browser. Let’s look at the authenticate handler function, which authenticates the user and returns a cookie to the client. The authenticate handler function is in the route_auth.go file, shown next.
+
+```
+func authenticate(w http.ResponseWriter, r *http.Request) {
+  r.ParseForm()
+  user, _ := data.UserByEmail(r.PostFormValue("email"))
+  if user.Password == data.Encrypt(r.PostFormValue("password")) {
+    session := user.CreateSession()
+    cookie := http.Cookie{
+      Name:      "_cookie",
+      Value:     session.Uuid,
+      HttpOnly:  true,
+    }
+    http.SetCookie(w, &cookie)
+    http.Redirect(w, r, "/", 302)
+  } else {
+    http.Redirect(w, r, "/login", 302)
+  }
 }
 ```
